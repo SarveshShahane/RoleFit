@@ -2,5 +2,14 @@ fastapi
 uvicorn
 dotenv
 boto3
-
 python-multipart
+voyageai
+langchain-community 
+langchain
+pypdf
+pymupdf
+qdrant-client
+httpx
+
+qdrant-client
+httpx
