@@ -133,6 +133,37 @@ class LLMClient:
         # Fall back to structured synthesis if model is unavailable.
         return self._fallback_generate(clean_query, candidates, intent)
 
+    def stream_answer(self, query: str, candidates: list[dict], intent: str = "search"):
+        clean_query = query.strip()
+        # Return greeting response without LLM call.
+        if intent == "general" or not clean_query:
+            yield (
+                "Hello! I am your ATS AI assistant. Ask me to find candidates "
+                "(e.g., 'Top 5 Python Backend Engineers with FastAPI'), evaluate candidates against a "
+                "Job Description, or deep-dive into specific candidate profiles."
+            )
+            return
+
+        # Return message if no candidates matched search.
+        if not candidates:
+            yield f"No candidate resumes in the database matched your search query: '{clean_query}'."
+            return
+
+        prompt_content = self._format_context_prompt(clean_query, candidates)
+
+        # Stream response chunks from LangChain generation chain.
+        if self.generation_chain:
+            try:
+                for chunk in self.generation_chain.stream({"prompt_content": prompt_content}):
+                    if chunk:
+                        yield chunk
+                return
+            except Exception as e:
+                print(f"[LLM WARNING] LangChain Groq streaming failed ({e}). Using fallback synthesis.")
+
+        # Fall back to structured synthesis if streaming fails.
+        yield self._fallback_generate(clean_query, candidates, intent)
+
     def _format_context_prompt(self, query: str, candidates: list[dict]) -> str:
         # Build structured context block for each candidate.
         context_blocks = []

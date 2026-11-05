@@ -35,3 +35,15 @@ class QueryResponse(BaseModel):
     candidates: list[CandidateResponse]
     answer: str | None = None
     message: str | None = None
+
+
+class ResumeItem(BaseModel):
+    resume_id: str
+    filename: str | None = None
+    name: str | None = None
+    role: str | None = None
+
+
+class ResumeListResponse(BaseModel):
+    resumes: list[ResumeItem]
+

@@ -1,3 +1,4 @@
+import json
 from rank_bm25 import BM25Okapi
 from qdrant_client import models
 from core.config import settings
@@ -79,6 +80,28 @@ def get_parent_resume(resume_id: str) -> dict:
         "name": name,
         "role": role,
     }
+
+
+def list_resumes() -> list[dict]:
+    # Retrieve unique candidate resumes indexed in Qdrant.
+    points, _ = qdrantdb_client.client.scroll(
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        limit=250,
+        with_payload=True,
+    )
+    seen = {}
+    for p in points:
+        payload = p.payload or {}
+        rid = payload.get("resume_id")
+        if rid and rid not in seen:
+            name, role = extract_candidate_meta(payload)
+            seen[rid] = {
+                "resume_id": str(rid),
+                "filename": payload.get("filename"),
+                "name": name,
+                "role": role,
+            }
+    return list(seen.values())
 
 
 def retrieve_candidates(
@@ -257,3 +280,134 @@ def retrieve_candidates(
         "answer": answer,
         "message": answer,
     }
+
+
+def retrieve_candidates_stream(
+    query: str,
+    resume_ids: list[str] | None = None,
+    limit: int | None = None,
+):
+    # Parse query into keywords, exclusions, dynamic limit, and intent.
+    parsed: ParsedQuery = llm_client.parse_query(query)
+    effective_limit = limit if limit is not None else parsed.limit
+
+    # Handle general greeting.
+    if parsed.intent == "general" and not resume_ids:
+        yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': 'general'})}\n\n"
+        for chunk in llm_client.stream_answer(query=query, candidates=[], intent="general"):
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
+
+    # Handle single resume lookup.
+    if resume_ids and len(resume_ids) == 1:
+        rid = resume_ids[0]
+        parent_data = get_parent_resume(rid)
+        if not parent_data["full_resume"]:
+            yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': 'deep_dive'})}\n\n"
+            yield f"data: {json.dumps({'type': 'token', 'content': f'Resume {rid} not found in database.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
+
+        preview = parent_data["full_resume"][:400] + ("..." if len(parent_data["full_resume"]) > 400 else "")
+        cand_item = {
+            "resume_id": rid,
+            "filename": parent_data["filename"],
+            "candidate_name": parent_data["name"],
+            "role": parent_data["role"],
+            "top_matched_chunk": preview,
+            "score": 1.0,
+            "full_resume": parent_data["full_resume"],
+        }
+        yield f"data: {json.dumps({'type': 'metadata', 'candidates': [cand_item], 'query': query, 'intent': 'deep_dive'})}\n\n"
+        for chunk in llm_client.stream_answer(query=query, candidates=[cand_item], intent="deep_dive"):
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
+
+    # Retrieval flow
+    qdrant_filter = None
+    if resume_ids:
+        qdrant_filter = models.Filter(
+            must=[models.FieldCondition(key="resume_id", match=models.MatchAny(any=resume_ids))]
+        )
+
+    search_text = parsed.rewritten_query or query
+    query_vector = voyage_client.embed_query(search_text)
+    groups = qdrantdb_client.group_search(
+        query=query_vector,
+        group_by="resume_id",
+        limit=effective_limit,
+        group_size=2,
+        query_filter=qdrant_filter,
+    )
+    if not groups:
+        yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': parsed.intent})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'content': 'No candidates matched your search criteria.'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
+
+    candidate_items = []
+    for group in groups:
+        rid = str(group.id)
+        best_hit = group.hits[0]
+        evidence_text = "\n\n".join(h.payload.get("page_content", "") for h in group.hits)
+
+        if parsed.exclude_keywords:
+            text_lower = evidence_text.lower()
+            if any(ex in text_lower for ex in parsed.exclude_keywords):
+                continue
+
+        name, role = extract_candidate_meta(best_hit.payload)
+        candidate_items.append({
+            "resume_id": rid,
+            "filename": best_hit.payload.get("filename"),
+            "name": name,
+            "role": role,
+            "text": evidence_text,
+            "score": best_hit.score or 0.0,
+        })
+
+    if not candidate_items:
+        yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': parsed.intent})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'content': 'No candidates matched your search criteria.'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
+
+    bm25_query = " ".join(parsed.keywords) if parsed.keywords else search_text
+    docs_text = [c["text"] for c in candidate_items]
+    bm25_scores = compute_bm25_scores(bm25_query, docs_text)
+    max_bm25 = max(bm25_scores) if max(bm25_scores, default=0) > 0 else 1.0
+
+    for i, c in enumerate(candidate_items):
+        c["combined_score"] = 0.7 * c["score"] + 0.3 * (bm25_scores[i] / max_bm25)
+
+    candidate_items.sort(key=lambda x: x["combined_score"], reverse=True)
+    reranked = rerank(search_text, candidate_items, top_n=effective_limit)
+
+    include_full = effective_limit <= 5
+    results = []
+    for c in reranked:
+        full_text = None
+        if include_full:
+            parent_data = get_parent_resume(c["resume_id"])
+            full_text = parent_data.get("full_resume")
+
+        results.append({
+            "resume_id": c["resume_id"],
+            "filename": c.get("filename"),
+            "candidate_name": c.get("name"),
+            "role": c.get("role"),
+            "top_matched_chunk": c["text"],
+            "score": round(c.get("combined_score", c.get("score", 0.0)), 4),
+            "full_resume": full_text,
+        })
+
+    # Yield candidate metadata first so frontend displays candidate cards right away.
+    yield f"data: {json.dumps({'type': 'metadata', 'candidates': results, 'query': query, 'intent': parsed.intent})}\n\n"
+
+    # Stream the tokens in real time.
+    for chunk in llm_client.stream_answer(query=query, candidates=results, intent=parsed.intent):
+        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
