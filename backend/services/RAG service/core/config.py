@@ -6,22 +6,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _get_required_env(key: str) -> str:
+    val = os.getenv(key)
+    if not val or not val.strip():
+        raise ValueError(f"Missing required environment variable: {key}")
+    return val.strip().strip('"').strip("'")
+
+
 class Settings:
     def __init__(self):
-        self.GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-        self.LLM_MODEL = os.getenv("LLM_MODEL")
-        self.REGION_NAME = os.getenv("REGION_NAME")
-        self.RESOURCE_NAME = os.getenv("RESOURCE_NAME")
-        self.TABLE_NAME = os.getenv("TABLE_NAME")
-        self.S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-        self.PRIMARY_KEY = os.getenv("PRIMARY_KEY")
-        self.QDRANT_API = os.getenv("QDRANT_API")
-        self.QDRANT_CLUSTER_ENDPOINT = os.getenv("QDRANT_CLUSTER_ENDPOINT")
-        self.JINA_API_KEY = os.getenv("JINA_API_KEY")
-        self.JINA_URL = os.getenv("JINA_URL")
-        self.VOYAGE_API = os.getenv("VOYAGE_API")
-        self.EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "voyage-4-large")
-        self.QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME")
+        self.GROQ_API_KEY: str = _get_required_env("GROQ_API_KEY")
+        self.LLM_MODEL: str = _get_required_env("LLM_MODEL")
+        self.QDRANT_API: str = _get_required_env("QDRANT_API")
+        self.QDRANT_CLUSTER_ENDPOINT: str = _get_required_env("QDRANT_CLUSTER_ENDPOINT")
+        self.QDRANT_COLLECTION_NAME: str = _get_required_env("QDRANT_COLLECTION_NAME")
+        self.VOYAGE_API: str = _get_required_env("VOYAGE_API")
+        self.EMBEDDING_MODEL: str = _get_required_env("EMBEDDING_MODEL")
 
 
 settings = Settings()

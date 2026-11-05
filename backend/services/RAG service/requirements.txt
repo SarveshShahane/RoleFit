@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+boto3
+voyageai
+qdrant-client
+httpx
+rank-bm25
+numpy
+langchain
+langchain-core
+langchain-groq
+
