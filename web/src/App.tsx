@@ -130,18 +130,18 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 flex flex-col font-sans selection:bg-slate-200">
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col font-sans selection:bg-slate-200 dark:selection:bg-zinc-800 transition-colors">
       <Header onOpenSelector={() => setIsSelectorOpen(true)} />
 
       {error && (
         <div className="w-full max-w-4xl mx-auto px-4 mt-2">
-          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
+          <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs rounded-xl">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
             <span className="flex-1">{error}</span>
             <button
               type="button"
               onClick={() => dispatch(setError(null))}
-              className="text-red-500 hover:text-red-700 font-semibold cursor-pointer"
+              className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-200 font-semibold cursor-pointer"
             >
               Dismiss
             </button>
@@ -162,7 +162,7 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      <footer className="sticky bottom-0 bg-gradient-to-t from-white via-white to-white/80 pt-2 pb-2">
+      <footer className="sticky bottom-0 bg-gradient-to-t from-white via-white to-white/80 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950/80 pt-2 pb-2 transition-colors">
         <ChatInput
           onSendMessage={handleSendMessage}
           onOpenSelector={() => setIsSelectorOpen(true)}

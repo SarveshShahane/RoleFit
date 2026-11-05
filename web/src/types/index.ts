@@ -74,5 +74,5 @@ export interface ChatState {
   isStreaming: boolean;
   streamingMessageId: string | null;
   error: string | null;
+  theme: 'light' | 'dark';
 }
-

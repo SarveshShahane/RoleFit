@@ -1,6 +1,20 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { Candidate, ChatState, Message, ResumeItem } from '../types';
 
+const getInitialTheme = (): 'light' | 'dark' => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  }
+  return 'light';
+};
+
+const initialTheme = getInitialTheme();
+if (typeof document !== 'undefined') {
+  document.documentElement.classList.toggle('dark', initialTheme === 'dark');
+}
+
 const initialState: ChatState = {
   messages: [
     {
@@ -17,6 +31,7 @@ const initialState: ChatState = {
   isStreaming: false,
   streamingMessageId: null,
   error: null,
+  theme: initialTheme,
 };
 
 export const chatSlice = createSlice({
@@ -103,6 +118,22 @@ export const chatSlice = createSlice({
       state.isStreaming = false;
       state.streamingMessageId = null;
     },
+
+    toggleTheme: (state) => {
+      state.theme = state.theme === 'light' ? 'dark' : 'light';
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('theme', state.theme);
+        document.documentElement.classList.toggle('dark', state.theme === 'dark');
+      }
+    },
+
+    setTheme: (state, action: PayloadAction<'light' | 'dark'>) => {
+      state.theme = action.payload;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('theme', state.theme);
+        document.documentElement.classList.toggle('dark', state.theme === 'dark');
+      }
+    },
   },
 });
 
@@ -119,7 +150,8 @@ export const {
   setLoading,
   setError,
   clearChat,
+  toggleTheme,
+  setTheme,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;
-

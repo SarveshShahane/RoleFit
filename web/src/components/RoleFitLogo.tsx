@@ -11,7 +11,7 @@ export const RoleFitLogo: React.FC<RoleFitLogoProps> = ({
 }) => {
   return (
     <div
-      className={`relative flex items-center justify-center flex-shrink-0 bg-transparent ${className}`}
+      className={`relative flex items-center justify-center flex-shrink-0 bg-transparent text-slate-900 dark:text-white ${className}`}
       style={{ width: size, height: size }}
       title="RoleFit ATS"
     >
@@ -21,31 +21,23 @@ export const RoleFitLogo: React.FC<RoleFitLogoProps> = ({
         xmlns="http://www.w3.org/2000/svg"
         className="w-full h-full"
       >
-        <defs>
-          <linearGradient id="rf-monogram-grad" x1="8" y1="5" x2="27" y2="31" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#0F172A" />
-            <stop offset="0.7" stopColor="#1E293B" />
-            <stop offset="1" stopColor="#334155" />
-          </linearGradient>
-        </defs>
-
         <path
           d="M8 5V31"
-          stroke="url(#rf-monogram-grad)"
+          stroke="currentColor"
           strokeWidth="3.4"
           strokeLinecap="round"
         />
 
         <path
           d="M8 5.5H27"
-          stroke="url(#rf-monogram-grad)"
+          stroke="currentColor"
           strokeWidth="3.4"
           strokeLinecap="round"
         />
 
         <path
           d="M9 6C19 6 25 8.5 25 13C25 17 19.5 18 12 18H25"
-          stroke="url(#rf-monogram-grad)"
+          stroke="currentColor"
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -53,7 +45,7 @@ export const RoleFitLogo: React.FC<RoleFitLogoProps> = ({
 
         <path
           d="M11 18L21 31"
-          stroke="url(#rf-monogram-grad)"
+          stroke="currentColor"
           strokeWidth="3.4"
           strokeLinecap="round"
         />
