@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { QueryRequest, QueryResponse, ResumeListResponse, StreamEvent } from '../types';
+import type { ChatRequest, ResumeListResponse, DocumentItem, StreamEvent } from '../types';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 
@@ -12,13 +12,13 @@ export const apiClient = axios.create({
 });
 
 export const resumeService = {
-  getResumes: async (): Promise<ResumeListResponse> => {
-    const response = await apiClient.get<ResumeListResponse>('/api/resumes');
+  getDocuments: async (): Promise<DocumentItem[]> => {
+    const response = await apiClient.get<DocumentItem[]>('/api/documents');
     return response.data;
   },
 
-  sendQuery: async (payload: QueryRequest): Promise<QueryResponse> => {
-    const response = await apiClient.post<QueryResponse>('/api/chat', payload);
+  getResumes: async (): Promise<ResumeListResponse> => {
+    const response = await apiClient.get<ResumeListResponse>('/api/resumes');
     return response.data;
   },
 };
@@ -31,11 +31,11 @@ export interface StreamCallbacks {
 }
 
 export async function streamChatQuery(
-  payload: QueryRequest,
+  payload: ChatRequest,
   callbacks: StreamCallbacks,
   signal?: AbortSignal
 ): Promise<void> {
-  const url = `${API_BASE_URL}/api/chat/stream`;
+  const url = `${API_BASE_URL}/api/chat`;
 
   try {
     const response = await fetch(url, {
@@ -87,8 +87,7 @@ export async function streamChatQuery(
           } else if (event.type === 'done' && callbacks.onDone) {
             callbacks.onDone();
           }
-        } catch (err) {
-          console.warn('[SSE Parse Error]', err, 'Raw:', jsonStr);
+        } catch {
         }
       }
     }

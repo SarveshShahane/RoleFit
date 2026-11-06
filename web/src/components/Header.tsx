@@ -18,19 +18,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSelector }) => {
   const totalCount = availableResumes.length;
 
   return (
-    <header className="sticky top-0 z-30 w-full bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-100 dark:border-zinc-800/80 px-4 sm:px-8 py-3.5 flex items-center justify-between transition-colors">
+    <header className="flex-shrink-0 z-30 w-full bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-100 dark:border-zinc-800/80 px-4 sm:px-8 py-3.5 flex items-center justify-between transition-colors">
       <div className="flex items-center gap-3">
         <RoleFitLogo />
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-base font-semibold text-slate-900 dark:text-zinc-100 tracking-tight">RoleFit ATS</h1>
-            <span className="text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-zinc-900 dark:text-emerald-400 dark:border-zinc-800">
-              Agentic RAG
-            </span>
+           
           </div>
-          <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Intelligent candidate retrieval, semantic ranking & deep resume analysis
-          </p>
+          
         </div>
       </div>
 

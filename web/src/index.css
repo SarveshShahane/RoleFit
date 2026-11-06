@@ -13,3 +13,24 @@
     color: #f4f4f5;
   }
 }
+
+@keyframes chat-cursor-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.streaming-cursor :last-child:not(:has(*))::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 3px;
+  vertical-align: -1.5px;
+  background-color: currentColor;
+  border-radius: 1px;
+  animation: chat-cursor-blink 0.8s steps(2, start) infinite;
+}

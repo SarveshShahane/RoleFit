@@ -25,27 +25,56 @@ export const App: React.FC = () => {
   const error = useAppSelector((state) => state.chat.error);
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mainScrollRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const loadResumes = async () => {
       try {
-        const data = await resumeService.getResumes();
-        dispatch(setAvailableResumes(data.resumes || []));
+        const docs = await resumeService.getDocuments();
+        dispatch(setAvailableResumes(docs || []));
       } catch (err: any) {
-        console.warn('Could not fetch resumes from backend:', err);
+        try {
+          const data = await resumeService.getResumes();
+          dispatch(setAvailableResumes(data.resumes || []));
+        } catch (fallbackErr) {
+          console.warn('Could not fetch resumes from backend:', fallbackErr);
+        }
       }
     };
     loadResumes();
   }, [dispatch]);
 
+  const handleScroll = () => {
+    if (!mainScrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = mainScrollRef.current;
+    userScrolledUpRef.current = scrollHeight - (scrollTop + clientHeight) > 120;
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!contentRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (userScrolledUpRef.current || !mainScrollRef.current) return;
+      mainScrollRef.current.scrollTop = mainScrollRef.current.scrollHeight;
+    });
+    observer.observe(contentRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (userScrolledUpRef.current || !mainScrollRef.current) return;
+    mainScrollRef.current.scrollTop = mainScrollRef.current.scrollHeight;
   }, [messages]);
 
   const handleSendMessage = async (queryText: string) => {
     if (isStreaming) return;
+
+    userScrolledUpRef.current = false;
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = mainScrollRef.current.scrollHeight;
+    }
 
     const userMessageId = `user-${Date.now()}`;
     const userMsg: Message = {
@@ -130,11 +159,11 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col font-sans selection:bg-slate-200 dark:selection:bg-zinc-800 transition-colors">
+    <div className="h-screen w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col overflow-hidden font-sans selection:bg-slate-200 dark:selection:bg-zinc-800 transition-colors">
       <Header onOpenSelector={() => setIsSelectorOpen(true)} />
 
       {error && (
-        <div className="w-full max-w-4xl mx-auto px-4 mt-2">
+        <div className="w-full max-w-4xl mx-auto px-4 mt-2 flex-shrink-0">
           <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs rounded-xl">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
             <span className="flex-1">{error}</span>
@@ -149,8 +178,12 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 w-full max-w-4xl mx-auto">
-        <div className="flex flex-col">
+      <main
+        ref={mainScrollRef}
+        onScroll={handleScroll}
+        className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-8 py-6 w-full max-w-4xl mx-auto"
+      >
+        <div ref={contentRef} className="flex flex-col">
           {messages.map((message) => (
             <ChatMessage
               key={message.id}
@@ -158,11 +191,10 @@ export const App: React.FC = () => {
               availableResumes={availableResumes}
             />
           ))}
-          <div ref={messagesEndRef} />
         </div>
       </main>
 
-      <footer className="sticky bottom-0 bg-gradient-to-t from-white via-white to-white/80 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950/80 pt-2 pb-2 transition-colors">
+      <footer className="flex-shrink-0 bg-gradient-to-t from-white via-white to-white/80 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950/80 pt-2 pb-2 transition-colors">
         <ChatInput
           onSendMessage={handleSendMessage}
           onOpenSelector={() => setIsSelectorOpen(true)}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Search, Check, FileText } from 'lucide-react';
+import { X, Search, Check, FileText, ExternalLink } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   toggleResumeId,
@@ -132,6 +132,19 @@ export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen
                       </div>
                     </div>
                   </div>
+
+                  {resume.pdf_url && (
+                    <a
+                      href={resume.pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="p-2 text-slate-400 hover:text-slate-800 dark:text-zinc-500 dark:hover:text-zinc-200 transition cursor-pointer"
+                      title="Open resume PDF from S3 in a new tab"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  )}
                 </div>
               );
             })
