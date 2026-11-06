@@ -22,6 +22,11 @@ class Settings:
         self.QDRANT_COLLECTION_NAME: str = _get_required_env("QDRANT_COLLECTION_NAME")
         self.VOYAGE_API: str = _get_required_env("VOYAGE_API")
         self.EMBEDDING_MODEL: str = _get_required_env("EMBEDDING_MODEL")
+        self.AWS_ACCESS_KEY_ID: str = _get_required_env("AWS_ACCESS_KEY_ID")
+        self.AWS_SECRET_ACCESS_KEY: str = _get_required_env("AWS_SECRET_ACCESS_KEY")
+        self.REGION_NAME: str = _get_required_env("REGION_NAME")
+        self.TABLE_NAME: str = _get_required_env("TABLE_NAME")
+        self.S3_BUCKET_NAME: str = _get_required_env("S3_BUCKET_NAME")
 
 
 settings = Settings()

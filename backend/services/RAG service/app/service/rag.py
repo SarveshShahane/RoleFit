@@ -1,15 +1,16 @@
 import json
+import re
 from rank_bm25 import BM25Okapi
 from qdrant_client import models
 from core.config import settings
 from app.clients.qdrantdb import qdrantdb_client
 from app.clients.voyage import voyage_client
 from app.clients.llm import llm_client
+from app.clients.aws import aws_client
 from app.schemas.rag import ParsedQuery
 
 
 def compute_bm25_scores(query: str, docs: list[str]) -> list[float]:
-    # Calculate BM25 keyword scores across candidate texts.
     if not docs:
         return []
 
@@ -22,8 +23,7 @@ def compute_bm25_scores(query: str, docs: list[str]) -> list[float]:
     return [float(s) for s in bm25.get_scores(tokenized_query)]
 
 
-def rerank(query: str, candidates: list[dict], top_n: int = 10) -> list[dict]:
-    # Rerank candidates with Voyage cross-encoder, fallback to vector score.
+def rerank(query: str, candidates: list[dict], top_n: int = 15) -> list[dict]:
     if not candidates:
         return []
     try:
@@ -34,14 +34,91 @@ def rerank(query: str, candidates: list[dict], top_n: int = 10) -> list[dict]:
             model="rerank-2",
             top_k=min(top_n, len(doc_texts)),
         )
-        return [candidates[r.index] for r in res.results]
+        ranked = []
+        for r in res.results:
+            c = candidates[r.index].copy()
+            score = float(r.relevance_score)
+            c["rerank_score"] = score
+            c["score"] = score
+            ranked.append(c)
+        return ranked
     except Exception as e:
         print(f"[RERANK] Voyage rerank error, fallback to score sorting: {e}")
         return sorted(candidates, key=lambda x: x.get("combined_score", x.get("score", 0.0)), reverse=True)[:top_n]
 
 
+def candidate_matches(c: dict, target_role: str | None, required_skills: list[str]) -> bool:
+    text_lower = (c.get("text") or "").lower()
+
+    if target_role:
+        tr = target_role.lower().strip()
+        if "product manager" in tr:
+            if not re.search(r'\bproduct\s+manager\b|\bproduct\s+management\b', text_lower):
+                return False
+        elif "project manager" in tr:
+            if not re.search(r'\bproject\s+manager\b|\bproject\s+management\b', text_lower):
+                return False
+        elif "scrum master" in tr:
+            if not re.search(r'\bscrum\s+master\b', text_lower):
+                return False
+        elif "python" in tr:
+            if not re.search(r'\bpython\b', text_lower):
+                return False
+        elif "java" in tr:
+            if not re.search(r'\bjava\b', text_lower):
+                return False
+        elif "php" in tr:
+            if not re.search(r'\bphp\b', text_lower):
+                return False
+        elif "hadoop" in tr:
+            if not re.search(r'\bhadoop\b', text_lower):
+                return False
+        else:
+            clean_tr_words = [w for w in re.findall(r'[a-zA-Z0-9+#]+', tr) if w not in ["developer", "engineer", "lead", "specialist"]]
+            if clean_tr_words:
+                if not any(re.search(r'\b' + re.escape(w) + r'\b', text_lower) for w in clean_tr_words):
+                    return False
+
+    if required_skills:
+        for sk in required_skills:
+            sk_clean = sk.lower().strip()
+            if not sk_clean:
+                continue
+            if sk_clean in ["node.js", "nodejs", "node js", "node"]:
+                if not re.search(r'\bnode(\.js|\s+js)?\b', text_lower):
+                    return False
+            else:
+                if not re.search(r'\b' + re.escape(sk_clean) + r'\b', text_lower):
+                    return False
+
+    return True
+
+
+def filter_relevant_candidates(parsed: ParsedQuery, candidates: list[dict]) -> list[dict]:
+    if not candidates:
+        return []
+
+    top_score = candidates[0].get("score", 0.0) if candidates else 0.0
+    filtered = []
+
+    for c in candidates:
+        score = c.get("score", 0.0)
+
+        if not candidate_matches(c, parsed.target_role, parsed.required_skills):
+            continue
+
+        if score < 0.28:
+            continue
+
+        if top_score > 0.40 and score < (top_score * 0.55):
+            continue
+
+        filtered.append(c)
+
+    return filtered
+
+
 def extract_candidate_meta(payload: dict) -> tuple[str, str]:
-    # Extract candidate name and role from metadata or file stem.
     name = payload.get("name") or payload.get("candidate_name")
     role = payload.get("role")
     filename = payload.get("filename")
@@ -58,7 +135,6 @@ def extract_candidate_meta(payload: dict) -> tuple[str, str]:
 
 
 def get_parent_resume(resume_id: str) -> dict:
-    # Reconstruct full resume text by sorting chunks from Qdrant.
     points, _ = qdrantdb_client.client.scroll(
         collection_name=settings.QDRANT_COLLECTION_NAME,
         scroll_filter=models.Filter(
@@ -68,7 +144,7 @@ def get_parent_resume(resume_id: str) -> dict:
         with_payload=True,
     )
     if not points:
-        return {"full_resume": "", "filename": None, "name": None, "role": None}
+        return {"full_resume": "", "filename": None, "name": None, "role": None, "s3_key": None}
 
     sorted_chunks = sorted(points, key=lambda p: p.payload.get("chunk_index", 0))
     full_text = "\n\n".join(p.payload.get("page_content", "") for p in sorted_chunks)
@@ -79,11 +155,18 @@ def get_parent_resume(resume_id: str) -> dict:
         "filename": meta.get("filename"),
         "name": name,
         "role": role,
+        "s3_key": meta.get("s3_key"),
     }
 
 
 def list_resumes() -> list[dict]:
-    # Retrieve unique candidate resumes indexed in Qdrant.
+    try:
+        docs = aws_client.get_documents()
+        if docs:
+            return docs
+    except Exception as e:
+        print(f"[AWS] Failed to fetch resumes from DynamoDB: {e}")
+
     points, _ = qdrantdb_client.client.scroll(
         collection_name=settings.QDRANT_COLLECTION_NAME,
         limit=250,
@@ -95,203 +178,28 @@ def list_resumes() -> list[dict]:
         rid = payload.get("resume_id")
         if rid and rid not in seen:
             name, role = extract_candidate_meta(payload)
+            s3_key = payload.get("s3_key")
+            pdf_url = aws_client.generate_presigned_url(s3_key) if s3_key else None
             seen[rid] = {
+                "id": str(rid),
                 "resume_id": str(rid),
                 "filename": payload.get("filename"),
                 "name": name,
                 "role": role,
+                "s3_key": s3_key,
+                "pdf_url": pdf_url,
             }
     return list(seen.values())
 
 
-def retrieve_candidates(
-    query: str,
-    resume_ids: list[str] | None = None,
-    limit: int | None = None,
-    generate: bool = True,
-) -> dict:
-    # Parse query into keywords, exclusions, dynamic limit, and intent.
-    parsed: ParsedQuery = llm_client.parse_query(query)
-    effective_limit = limit if limit is not None else parsed.limit
-
-    # Return early for conversational greetings.
-    if parsed.intent == "general" and not resume_ids:
-        msg = "Hello! I am your ATS assistant. Ask me to find candidates (e.g. 'Top 25 Java Developers with AWS') or paste a Job Description."
-        return {
-            "query": query,
-            "rewritten_query": parsed.rewritten_query,
-            "intent": "general",
-            "total_candidates": 0,
-            "candidates": [],
-            "answer": msg,
-            "message": msg,
-        }
-
-    # Fast path for single candidate lookup.
-    if resume_ids and len(resume_ids) == 1:
-        rid = resume_ids[0]
-        parent_data = get_parent_resume(rid)
-        if not parent_data["full_resume"]:
-            not_found_msg = f"Resume '{rid}' was not found in the database."
-            return {
-                "query": query,
-                "rewritten_query": parsed.rewritten_query,
-                "intent": "deep_dive",
-                "total_candidates": 0,
-                "candidates": [],
-                "answer": not_found_msg,
-                "message": not_found_msg,
-            }
-        preview = parent_data["full_resume"][:400] + ("..." if len(parent_data["full_resume"]) > 400 else "")
-        cand_item = {
-            "resume_id": rid,
-            "filename": parent_data["filename"],
-            "candidate_name": parent_data["name"],
-            "role": parent_data["role"],
-            "top_matched_chunk": preview,
-            "score": 1.0,
-            "full_resume": parent_data["full_resume"],
-        }
-        answer = None
-        if generate:
-            answer = llm_client.generate_answer(query=query, candidates=[cand_item], intent="deep_dive")
-
-        return {
-            "query": query,
-            "rewritten_query": parsed.rewritten_query,
-            "intent": "deep_dive",
-            "total_candidates": 1,
-            "candidates": [cand_item],
-            "answer": answer,
-            "message": answer,
-        }
-
-    # Filter search by resume IDs when provided.
-    qdrant_filter = None
-    if resume_ids:
-        qdrant_filter = models.Filter(
-            must=[models.FieldCondition(key="resume_id", match=models.MatchAny(any=resume_ids))]
-        )
-
-    # Embed search query with Voyage.
-    search_text = parsed.rewritten_query or query
-    query_vector = voyage_client.embed_query(search_text)
-
-    # Query Qdrant grouped by resume ID to return unique candidates.
-    groups = qdrantdb_client.group_search(
-        query=query_vector,
-        group_by="resume_id",
-        limit=effective_limit,
-        group_size=2,
-        query_filter=qdrant_filter,
-    )
-    if not groups:
-        no_res_msg = f"No candidate resumes in the database matched your criteria for: '{query}'."
-        return {
-            "query": query,
-            "rewritten_query": search_text,
-            "intent": parsed.intent,
-            "total_candidates": 0,
-            "candidates": [],
-            "answer": no_res_msg,
-            "message": no_res_msg,
-        }
-
-    # Extract evidence and skip candidates with excluded keywords.
-    candidate_items = []
-    for group in groups:
-        rid = str(group.id)
-        best_hit = group.hits[0]
-        evidence_text = "\n\n".join(h.payload.get("page_content", "") for h in group.hits)
-
-        if parsed.exclude_keywords:
-            text_lower = evidence_text.lower()
-            if any(ex in text_lower for ex in parsed.exclude_keywords):
-                continue
-
-        name, role = extract_candidate_meta(best_hit.payload)
-        candidate_items.append({
-            "resume_id": rid,
-            "filename": best_hit.payload.get("filename"),
-            "name": name,
-            "role": role,
-            "text": evidence_text,
-            "score": best_hit.score or 0.0,
-        })
-
-    if not candidate_items:
-        no_cand_msg = f"No candidate resumes in the database matched your criteria for: '{query}'."
-        return {
-            "query": query,
-            "rewritten_query": search_text,
-            "intent": parsed.intent,
-            "total_candidates": 0,
-            "candidates": [],
-            "answer": no_cand_msg,
-            "message": no_cand_msg,
-        }
-
-    # Score candidate evidence with BM25 keyword matching.
-    bm25_query = " ".join(parsed.keywords) if parsed.keywords else search_text
-    docs_text = [c["text"] for c in candidate_items]
-    bm25_scores = compute_bm25_scores(bm25_query, docs_text)
-    max_bm25 = max(bm25_scores) if max(bm25_scores, default=0) > 0 else 1.0
-
-    # Combine vector score with BM25 keyword score.
-    for i, c in enumerate(candidate_items):
-        c["combined_score"] = 0.7 * c["score"] + 0.3 * (bm25_scores[i] / max_bm25)
-
-    candidate_items.sort(key=lambda x: x["combined_score"], reverse=True)
-
-    # Rerank candidates using Voyage reranker.
-    reranked = rerank(search_text, candidate_items, top_n=effective_limit)
-
-    # Attach full resume text only for small result sets.
-    include_full = effective_limit <= 5
-    results = []
-
-    for c in reranked:
-        full_text = None
-        if include_full:
-            parent_data = get_parent_resume(c["resume_id"])
-            full_text = parent_data.get("full_resume")
-
-        results.append({
-            "resume_id": c["resume_id"],
-            "filename": c.get("filename"),
-            "candidate_name": c.get("name"),
-            "role": c.get("role"),
-            "top_matched_chunk": c["text"],
-            "score": round(c.get("combined_score", c.get("score", 0.0)), 4),
-            "full_resume": full_text,
-        })
-
-    # Generate ATS answer based on candidate evidence.
-    answer = None
-    if generate:
-        answer = llm_client.generate_answer(query=query, candidates=results, intent=parsed.intent)
-
-    return {
-        "query": query,
-        "rewritten_query": search_text,
-        "intent": parsed.intent,
-        "total_candidates": len(results),
-        "candidates": results,
-        "answer": answer,
-        "message": answer,
-    }
-
-
-def retrieve_candidates_stream(
+def stream_candidate_search(
     query: str,
     resume_ids: list[str] | None = None,
     limit: int | None = None,
 ):
-    # Parse query into keywords, exclusions, dynamic limit, and intent.
     parsed: ParsedQuery = llm_client.parse_query(query)
     effective_limit = limit if limit is not None else parsed.limit
 
-    # Handle general greeting.
     if parsed.intent == "general" and not resume_ids:
         yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': 'general'})}\n\n"
         for chunk in llm_client.stream_answer(query=query, candidates=[], intent="general"):
@@ -299,7 +207,6 @@ def retrieve_candidates_stream(
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 
-    # Handle single resume lookup.
     if resume_ids and len(resume_ids) == 1:
         rid = resume_ids[0]
         parent_data = get_parent_resume(rid)
@@ -310,6 +217,8 @@ def retrieve_candidates_stream(
             return
 
         preview = parent_data["full_resume"][:400] + ("..." if len(parent_data["full_resume"]) > 400 else "")
+        s3_key = parent_data.get("s3_key")
+        pdf_url = aws_client.generate_presigned_url(s3_key) if s3_key else None
         cand_item = {
             "resume_id": rid,
             "filename": parent_data["filename"],
@@ -318,6 +227,8 @@ def retrieve_candidates_stream(
             "top_matched_chunk": preview,
             "score": 1.0,
             "full_resume": parent_data["full_resume"],
+            "s3_key": s3_key,
+            "pdf_url": pdf_url,
         }
         yield f"data: {json.dumps({'type': 'metadata', 'candidates': [cand_item], 'query': query, 'intent': 'deep_dive'})}\n\n"
         for chunk in llm_client.stream_answer(query=query, candidates=[cand_item], intent="deep_dive"):
@@ -325,7 +236,6 @@ def retrieve_candidates_stream(
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 
-    # Retrieval flow
     qdrant_filter = None
     if resume_ids:
         qdrant_filter = models.Filter(
@@ -334,20 +244,23 @@ def retrieve_candidates_stream(
 
     search_text = parsed.rewritten_query or query
     query_vector = voyage_client.embed_query(search_text)
+    fetch_limit = max(25, effective_limit * 3)
     groups = qdrantdb_client.group_search(
         query=query_vector,
         group_by="resume_id",
-        limit=effective_limit,
+        limit=fetch_limit,
         group_size=2,
         query_filter=qdrant_filter,
     )
     if not groups:
         yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': parsed.intent})}\n\n"
-        yield f"data: {json.dumps({'type': 'token', 'content': 'No candidates matched your search criteria.'})}\n\n"
+        for chunk in llm_client.stream_answer(query=query, candidates=[], intent=parsed.intent):
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 
     candidate_items = []
+    seen_keys = set()
     for group in groups:
         rid = str(group.id)
         best_hit = group.hits[0]
@@ -359,6 +272,16 @@ def retrieve_candidates_stream(
                 continue
 
         name, role = extract_candidate_meta(best_hit.payload)
+        name_key = (name or "").strip().lower()
+        role_key = (role or "").strip().lower()
+        fname_key = (best_hit.payload.get("filename") or "").strip().lower()
+        key = (name_key, role_key)
+        if key in seen_keys or (fname_key and fname_key in seen_keys):
+            continue
+        seen_keys.add(key)
+        if fname_key:
+            seen_keys.add(fname_key)
+
         candidate_items.append({
             "resume_id": rid,
             "filename": best_hit.payload.get("filename"),
@@ -366,11 +289,13 @@ def retrieve_candidates_stream(
             "role": role,
             "text": evidence_text,
             "score": best_hit.score or 0.0,
+            "s3_key": best_hit.payload.get("s3_key"),
         })
 
     if not candidate_items:
         yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': parsed.intent})}\n\n"
-        yield f"data: {json.dumps({'type': 'token', 'content': 'No candidates matched your search criteria.'})}\n\n"
+        for chunk in llm_client.stream_answer(query=query, candidates=[], intent=parsed.intent):
+            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 
@@ -383,15 +308,25 @@ def retrieve_candidates_stream(
         c["combined_score"] = 0.7 * c["score"] + 0.3 * (bm25_scores[i] / max_bm25)
 
     candidate_items.sort(key=lambda x: x["combined_score"], reverse=True)
-    reranked = rerank(search_text, candidate_items, top_n=effective_limit)
+    reranked = rerank(search_text, candidate_items, top_n=min(15, len(candidate_items)))
+
+    filtered_candidates = filter_relevant_candidates(parsed, reranked)[:effective_limit]
 
     include_full = effective_limit <= 5
     results = []
-    for c in reranked:
+    for c in filtered_candidates:
         full_text = None
         if include_full:
             parent_data = get_parent_resume(c["resume_id"])
             full_text = parent_data.get("full_resume")
+
+        s3_key = c.get("s3_key")
+        pdf_url = None
+        if s3_key:
+            try:
+                pdf_url = aws_client.generate_presigned_url(s3_key)
+            except Exception:
+                pass
 
         results.append({
             "resume_id": c["resume_id"],
@@ -399,15 +334,18 @@ def retrieve_candidates_stream(
             "candidate_name": c.get("name"),
             "role": c.get("role"),
             "top_matched_chunk": c["text"],
-            "score": round(c.get("combined_score", c.get("score", 0.0)), 4),
+            "score": round(c.get("score", 0.0), 4),
             "full_resume": full_text,
+            "s3_key": s3_key,
+            "pdf_url": pdf_url,
         })
 
-    # Yield candidate metadata first so frontend displays candidate cards right away.
     yield f"data: {json.dumps({'type': 'metadata', 'candidates': results, 'query': query, 'intent': parsed.intent})}\n\n"
 
-    # Stream the tokens in real time.
     for chunk in llm_client.stream_answer(query=query, candidates=results, intent=parsed.intent):
         yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+retrieve_candidates_stream = stream_candidate_search
