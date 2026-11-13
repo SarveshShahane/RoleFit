@@ -9,6 +9,7 @@ from app.clients.dynamo_db import db
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 
+@router.post("")
 @router.post("/")
 def upload_file(files: list[UploadFile] = File(...)):
 
