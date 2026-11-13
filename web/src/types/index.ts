@@ -75,6 +75,25 @@ export interface StreamDonePayload {
 
 export type StreamEvent = StreamMetadataPayload | StreamTokenPayload | StreamDonePayload;
 
+export interface UploadFileResult {
+  id: number;
+  filename: string;
+  status: 'pending' | 'uploading' | 'success' | 'failed';
+  file_id?: string;
+  s3_key?: string;
+  error?: {
+    error_code?: number | string;
+    error_message?: string;
+  } | null;
+}
+
+export interface UploadResponse {
+  'total documents': number;
+  'successful uploads': number;
+  'failed uploads': number;
+  result: UploadFileResult[];
+}
+
 export interface ChatState {
   messages: Message[];
   availableResumes: ResumeItem[];

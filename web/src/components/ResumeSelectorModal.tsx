@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Search, Check, FileText, ExternalLink } from 'lucide-react';
+import { X, Search, Check, FileText, ExternalLink, UploadCloud } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   toggleResumeId,
@@ -10,9 +10,10 @@ import {
 interface ResumeSelectorModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenUpload?: () => void;
 }
 
-export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen, onClose }) => {
+export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen, onClose, onOpenUpload }) => {
   const dispatch = useAppDispatch();
   const availableResumes = useAppSelector((state) => state.chat.availableResumes);
   const selectedResumeIds = useAppSelector((state) => state.chat.selectedResumeIds);
@@ -91,8 +92,21 @@ export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen
 
         <div className="flex-1 overflow-y-auto px-6 py-3 divide-y divide-slate-100 dark:divide-zinc-800/80">
           {filteredResumes.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400 dark:text-zinc-500">
-              No matching candidate resumes found.
+            <div className="py-8 text-center text-xs text-slate-400 dark:text-zinc-500 space-y-2">
+              <p>No matching candidate resumes found.</p>
+              {onOpenUpload && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenUpload();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-900 dark:text-zinc-100 bg-slate-100 dark:bg-zinc-800 rounded-lg hover:bg-slate-200 dark:hover:bg-zinc-700 transition cursor-pointer"
+                >
+                  <UploadCloud className="h-3.5 w-3.5" />
+                  <span>Upload Resumes</span>
+                </button>
+              )}
             </div>
           ) : (
             filteredResumes.map((resume) => {
@@ -115,20 +129,19 @@ export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen
                     >
                       {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
                     </div>
+
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-900 dark:text-zinc-100 truncate">
+                        <span className="font-semibold text-slate-900 dark:text-zinc-100 text-sm truncate">
                           {resume.name || 'Candidate'}
                         </span>
-                        {resume.role && (
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-medium">
-                            {resume.role}
-                          </span>
-                        )}
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 font-medium">
+                          {resume.role || 'Applicant'}
+                        </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 dark:text-zinc-500 truncate flex items-center gap-1 mt-0.5">
-                        <FileText className="h-3 w-3 inline" />
-                        <span>{resume.filename || resume.resume_id}</span>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500 mt-0.5 truncate">
+                        <FileText className="h-3 w-3 inline flex-shrink-0" />
+                        <span className="truncate">{resume.filename}</span>
                       </div>
                     </div>
                   </div>
@@ -139,7 +152,7 @@ export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
-                      className="p-2 text-slate-400 hover:text-slate-800 dark:text-zinc-500 dark:hover:text-zinc-200 transition cursor-pointer"
+                      className="text-xs text-slate-400 hover:text-slate-800 dark:text-zinc-500 dark:hover:text-zinc-200 p-1.5 rounded-md hover:bg-slate-200/50 dark:hover:bg-zinc-700/50 transition cursor-pointer flex-shrink-0"
                       title="Open resume PDF from S3 in a new tab"
                     >
                       <ExternalLink className="h-4 w-4" />
@@ -163,13 +176,28 @@ export const ResumeSelectorModal: React.FC<ResumeSelectorModalProps> = ({ isOpen
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-white dark:text-zinc-900 bg-slate-900 dark:bg-zinc-100 hover:bg-slate-800 dark:hover:bg-white rounded-xl transition shadow-xs cursor-pointer"
-          >
-            Apply & Done
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenUpload && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenUpload();
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-zinc-300 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800 transition cursor-pointer"
+              >
+                <UploadCloud className="h-3.5 w-3.5" />
+                <span>Upload New</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-semibold text-white dark:text-zinc-900 bg-slate-900 dark:bg-zinc-100 hover:bg-slate-800 dark:hover:bg-white rounded-xl transition shadow-xs cursor-pointer"
+            >
+              Apply & Done
+            </button>
+          </div>
         </div>
       </div>
     </div>

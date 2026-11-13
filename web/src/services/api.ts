@@ -1,7 +1,7 @@
 import axios from 'axios';
-import type { ChatRequest, ResumeListResponse, DocumentItem, StreamEvent } from '../types';
+import type { ChatRequest, ResumeListResponse, DocumentItem, StreamEvent, UploadResponse } from '../types';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL !== undefined ? import.meta.env.VITE_API_BASE_URL : 'http://127.0.0.1').replace(/\/+$/, '');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -19,6 +19,25 @@ export const resumeService = {
 
   getResumes: async (): Promise<ResumeListResponse> => {
     const response = await apiClient.get<ResumeListResponse>('/api/resumes');
+    return response.data;
+  },
+
+  uploadFiles: async (files: File[]): Promise<UploadResponse> => {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await apiClient.post<UploadResponse>(
+      '/api/upload',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 180000,
+      }
+    );
     return response.data;
   },
 };

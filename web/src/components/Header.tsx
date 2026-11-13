@@ -1,14 +1,15 @@
 import React from 'react';
-import { RefreshCw, Users, Sun, Moon } from 'lucide-react';
+import { RefreshCw, Users, Sun, Moon, UploadCloud } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { clearChat, toggleTheme } from '../store/chatSlice';
 import { RoleFitLogo } from './RoleFitLogo';
 
 interface HeaderProps {
   onOpenSelector: () => void;
+  onOpenUpload: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenSelector }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenSelector, onOpenUpload }) => {
   const dispatch = useAppDispatch();
   const availableResumes = useAppSelector((state) => state.chat.availableResumes);
   const selectedResumeIds = useAppSelector((state) => state.chat.selectedResumeIds);
@@ -24,13 +25,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSelector }) => {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-base font-semibold text-slate-900 dark:text-zinc-100 tracking-tight">RoleFit ATS</h1>
-           
           </div>
-          
         </div>
       </div>
 
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenUpload}
+          className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:text-zinc-200 transition shadow-2xs cursor-pointer"
+          title="Upload single or multiple resumes"
+        >
+          <UploadCloud className="h-3.5 w-3.5 text-slate-500 dark:text-zinc-400" />
+          <span>Upload</span>
+        </button>
+
         <button
           type="button"
           onClick={onOpenSelector}

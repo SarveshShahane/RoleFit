@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
   addMessage,
@@ -14,6 +14,7 @@ import { Header } from './components/Header';
 import { ChatMessage } from './components/ChatMessage';
 import { ChatInput } from './components/ChatInput';
 import { ResumeSelectorModal } from './components/ResumeSelectorModal';
+import { UploadModal } from './components/UploadModal';
 import { AlertCircle } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -25,27 +26,29 @@ export const App: React.FC = () => {
   const error = useAppSelector((state) => state.chat.error);
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const mainScrollRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    const loadResumes = async () => {
+  const refreshResumes = useCallback(async () => {
+    try {
+      const docs = await resumeService.getDocuments();
+      dispatch(setAvailableResumes(docs || []));
+    } catch {
       try {
-        const docs = await resumeService.getDocuments();
-        dispatch(setAvailableResumes(docs || []));
-      } catch (err: any) {
-        try {
-          const data = await resumeService.getResumes();
-          dispatch(setAvailableResumes(data.resumes || []));
-        } catch (fallbackErr) {
-          console.warn('Could not fetch resumes from backend:', fallbackErr);
-        }
+        const data = await resumeService.getResumes();
+        dispatch(setAvailableResumes(data.resumes || []));
+      } catch (fallbackErr) {
+        console.warn('Could not fetch resumes from backend:', fallbackErr);
       }
-    };
-    loadResumes();
+    }
   }, [dispatch]);
+
+  useEffect(() => {
+    refreshResumes();
+  }, [refreshResumes]);
 
   const handleScroll = () => {
     if (!mainScrollRef.current) return;
@@ -160,7 +163,10 @@ export const App: React.FC = () => {
 
   return (
     <div className="h-screen w-full bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col overflow-hidden font-sans selection:bg-slate-200 dark:selection:bg-zinc-800 transition-colors">
-      <Header onOpenSelector={() => setIsSelectorOpen(true)} />
+      <Header
+        onOpenSelector={() => setIsSelectorOpen(true)}
+        onOpenUpload={() => setIsUploadOpen(true)}
+      />
 
       {error && (
         <div className="w-full max-w-4xl mx-auto px-4 mt-2 flex-shrink-0">
@@ -206,6 +212,13 @@ export const App: React.FC = () => {
       <ResumeSelectorModal
         isOpen={isSelectorOpen}
         onClose={() => setIsSelectorOpen(false)}
+        onOpenUpload={() => setIsUploadOpen(true)}
+      />
+
+      <UploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onUploadComplete={refreshResumes}
       />
     </div>
   );
