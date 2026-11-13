@@ -1,0 +1,73 @@
+services:
+  api-gateway:
+    image: nginx:alpine
+    container_name: rolefit-api-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      rag-service:
+        condition: service_healthy
+      upload-service:
+        condition: service_healthy
+    networks:
+      - backend-network
+
+  rag-service:
+    build:
+      context: ./services/RAG service
+      dockerfile: Dockerfile
+    container_name: rolefit-rag-service
+    restart: unless-stopped
+    volumes:
+      - ./services/RAG service/app:/app/app
+      - ./services/RAG service/core:/app/core
+    env_file:
+      - ./services/RAG service/.env
+    environment:
+      - PORT=8000
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      backend-network:
+        aliases:
+          - rag-service
+
+  upload-service:
+    build:
+      context: ./services/upload service
+      dockerfile: Dockerfile
+    container_name: rolefit-upload-service
+    restart: unless-stopped
+    volumes:
+      - ./services/upload service/app:/app/app
+      - ./services/upload service/core:/app/core
+    env_file:
+      - ./services/upload service/.env
+    environment:
+      - PORT=8000
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      backend-network:
+        aliases:
+          - upload-service
+
+networks:
+  backend-network:
+    driver: bridge
+    name: rolefit-internal-bridge
