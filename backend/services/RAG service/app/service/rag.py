@@ -80,15 +80,24 @@ def candidate_matches(c: dict, target_role: str | None, required_skills: list[st
                     return False
 
     if required_skills:
-        for sk in required_skills:
-            sk_clean = sk.lower().strip()
-            if not sk_clean:
-                continue
-            if sk_clean in ["node.js", "nodejs", "node js", "node"]:
+        hard_skills = [
+            s.lower().strip() for s in required_skills
+            if s.lower().strip() in [
+                "python", "java", "php", "golang", "c++", "c#", "ruby", "rust",
+                "node.js", "nodejs", "node js", "node", "react", "angular", "vue",
+                "aws", "docker", "kubernetes", "django", "fastapi", "spring boot",
+                "spring", "hadoop", "spark"
+            ]
+        ]
+        for sk in hard_skills:
+            if sk in ["node.js", "nodejs", "node js", "node"]:
                 if not re.search(r'\bnode(\.js|\s+js)?\b', text_lower):
                     return False
+            elif sk in ["spring boot", "spring"]:
+                if not re.search(r'\bspring(\s+boot)?\b', text_lower):
+                    return False
             else:
-                if not re.search(r'\b' + re.escape(sk_clean) + r'\b', text_lower):
+                if not re.search(r'\b' + re.escape(sk) + r'\b', text_lower):
                     return False
 
     return True
@@ -134,7 +143,7 @@ def extract_candidate_meta(payload: dict) -> tuple[str, str]:
     return name or "Candidate", role or "Applicant"
 
 
-def get_parent_resume(resume_id: str) -> dict:
+def get_parent_resume(resume_id: str, filename: str | None = None) -> dict:
     points, _ = qdrantdb_client.client.scroll(
         collection_name=settings.QDRANT_COLLECTION_NAME,
         scroll_filter=models.Filter(
@@ -143,6 +152,18 @@ def get_parent_resume(resume_id: str) -> dict:
         limit=100,
         with_payload=True,
     )
+    if not points and filename:
+        try:
+            all_pts, _ = qdrantdb_client.client.scroll(
+                collection_name=settings.QDRANT_COLLECTION_NAME,
+                limit=300,
+                with_payload=True,
+            )
+            clean_fn = filename.lower().strip()
+            points = [p for p in all_pts if (p.payload or {}).get("filename", "").lower().strip() == clean_fn]
+        except Exception as e:
+            print(f"[QDRANT] Fallback filename scroll failed: {e}")
+
     if not points:
         return {"full_resume": "", "filename": None, "name": None, "role": None, "s3_key": None}
 
@@ -207,31 +228,51 @@ def stream_candidate_search(
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
 
-    if resume_ids and len(resume_ids) == 1:
-        rid = resume_ids[0]
-        parent_data = get_parent_resume(rid)
-        if not parent_data["full_resume"]:
-            yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': 'deep_dive'})}\n\n"
-            yield f"data: {json.dumps({'type': 'token', 'content': f'Resume {rid} not found in database.'})}\n\n"
+    if resume_ids:
+        cand_items = []
+        doc_list = []
+        try:
+            doc_list = aws_client.get_documents()
+        except Exception as e:
+            print(f"[AWS] Failed to list documents for scoped lookup: {e}")
+
+        for rid in resume_ids:
+            doc_meta = next((d for d in doc_list if d.get("id") == rid or d.get("resume_id") == rid), None)
+            fn = doc_meta.get("filename") if doc_meta else None
+
+            parent_data = get_parent_resume(rid, filename=fn)
+            full_text = parent_data.get("full_resume") or ""
+            if not full_text:
+                continue
+
+            name = parent_data.get("name") or (doc_meta.get("name") if doc_meta else None) or "Candidate"
+            role = parent_data.get("role") or (doc_meta.get("role") if doc_meta else None) or "Applicant"
+            s3_key = parent_data.get("s3_key") or (doc_meta.get("s3_key") if doc_meta else None)
+            filename = parent_data.get("filename") or fn
+            pdf_url = aws_client.generate_presigned_url(s3_key) if s3_key else None
+            preview = full_text[:400] + ("..." if len(full_text) > 400 else "")
+
+            cand_items.append({
+                "resume_id": rid,
+                "filename": filename,
+                "candidate_name": name,
+                "role": role,
+                "top_matched_chunk": preview,
+                "score": 1.0,
+                "full_resume": full_text,
+                "s3_key": s3_key,
+                "pdf_url": pdf_url,
+            })
+
+        if not cand_items:
+            yield f"data: {json.dumps({'type': 'metadata', 'candidates': [], 'query': query, 'intent': 'scoped'})}\n\n"
+            yield f"data: {json.dumps({'type': 'token', 'content': 'Selected candidate resumes could not be found in the database.'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             return
 
-        preview = parent_data["full_resume"][:400] + ("..." if len(parent_data["full_resume"]) > 400 else "")
-        s3_key = parent_data.get("s3_key")
-        pdf_url = aws_client.generate_presigned_url(s3_key) if s3_key else None
-        cand_item = {
-            "resume_id": rid,
-            "filename": parent_data["filename"],
-            "candidate_name": parent_data["name"],
-            "role": parent_data["role"],
-            "top_matched_chunk": preview,
-            "score": 1.0,
-            "full_resume": parent_data["full_resume"],
-            "s3_key": s3_key,
-            "pdf_url": pdf_url,
-        }
-        yield f"data: {json.dumps({'type': 'metadata', 'candidates': [cand_item], 'query': query, 'intent': 'deep_dive'})}\n\n"
-        for chunk in llm_client.stream_answer(query=query, candidates=[cand_item], intent="deep_dive"):
+        scoped_intent = "deep_dive" if len(cand_items) == 1 else "comparison"
+        yield f"data: {json.dumps({'type': 'metadata', 'candidates': cand_items, 'query': query, 'intent': scoped_intent})}\n\n"
+        for chunk in llm_client.stream_answer(query=query, candidates=cand_items, intent=scoped_intent):
             yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return
@@ -312,7 +353,11 @@ def stream_candidate_search(
 
     filtered_candidates = filter_relevant_candidates(parsed, reranked)[:effective_limit]
 
-    include_full = effective_limit <= 5
+    is_comparison = bool(re.search(r'\b(compare|comparison|versus|vs|difference|between)\b', query, re.I))
+    if is_comparison and len(filtered_candidates) < 2 and len(reranked) >= 2:
+        filtered_candidates = reranked[:2]
+
+    include_full = effective_limit <= 5 or is_comparison
     results = []
     for c in filtered_candidates:
         full_text = None

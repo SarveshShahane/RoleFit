@@ -20,7 +20,6 @@ class AWSClient:
         self.table = self.dynamodb.Table(settings.TABLE_NAME)
 
     def generate_presigned_url(self, s3_key: str, expires_in: int = 3600) -> str:
-        # Generate inline presigned URL so browser opens PDF directly in a new tab.
         return self.s3.generate_presigned_url(
             "get_object",
             Params={
@@ -42,7 +41,6 @@ class AWSClient:
         return name, role
 
     def get_documents(self) -> list[dict]:
-        # Query all resume records from DynamoDB partition key.
         response = self.table.query(
             KeyConditionExpression=Key("PK").eq("resume")
         )
@@ -76,4 +74,3 @@ class AWSClient:
 
 
 aws_client = AWSClient()
-
